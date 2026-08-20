@@ -1,5 +1,11 @@
 # 02 - How It Works
 
+## Control Rule
+
+**The agent proposes. An independent PEP decides. The kill switch terminates without asking nicely.**
+
+A model classifier can advise the PDP, but it is not a security boundary. The PEP enforces policy; the classifier informs it.
+
 ## Request Flow
 
 Every action an agent wants to perform flows through the broker:

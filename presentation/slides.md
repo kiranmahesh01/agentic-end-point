@@ -39,17 +39,16 @@ style: |
 
 # The Problem
 
-AI agents act under your identity.
-When compromised, they have your credentials.
+Agents on endpoints misuse legitimate tools and valid credentials.
 
-**Compromise is a sentence, not a binary.**
+**The exploit is often a sentence—not malware.**
 
 <!--
 Speaker notes:
-- AI agents are proliferating: coding agents, browser extensions, IDE plugins
-- They inherit user credentials and permissions
-- Attack surface is a prompt, not a binary
-- EDR can't distinguish agent actions from user actions
+- Goal hijack, poisoned skill, inherited token
+- Uses the same tools and APIs the user would
+- EDR sees normal behavior from user's process
+- This is not binary malware detection
 -->
 
 ---
@@ -79,24 +78,25 @@ Speaker notes:
 | Attack | Vector | Impact |
 |--------|--------|--------|
 | **Goal Hijacking** | Prompt injection in data | Agent works for attacker |
-| **Tool Poisoning** | Malicious tool definition | Arbitrary code execution |
-| **Credential Theft** | Over-delegated PAT | Full account compromise |
-| **Data Exfiltration** | Confused deputy | Secrets sent to attacker |
+| **Tool Poisoning** | Malicious skill definition | Arbitrary code execution |
+| **Token Inheritance** | Over-delegated PAT | Full account compromise |
+| **Confused Deputy** | Trusted agent, bad input | Secrets sent to attacker |
 
-**CVE-2025-32711 (EchoLeak)**: Zero-click prompt injection in Copilot
+**CVE-2025-32711 (EchoLeak)**: Patched zero-click vuln in Copilot
+*(Not a confirmed in-the-wild breach)*
 
 <!--
 Speaker notes:
 - Goal hijacking: agent reads malicious doc, follows attacker instructions
-- Tool poisoning: agent loads modified tool, executes backdoor
-- EchoLeak demonstrated real-world zero-click attack
+- Tool poisoning: agent loads modified skill, executes backdoor
+- EchoLeak was patched; demonstrates the attack class
 -->
 
 ---
 
 # Why EDR Is Not Enough
 
-EDR sees the user's process.
+EDR stays mandatory. EDR sees the user's process.
 EDR cannot see:
 
 - Which **agent** performed the action
@@ -110,7 +110,7 @@ Speaker notes:
 - EDR monitors process behavior: files, network, registry
 - But all agent actions look like user actions
 - No visibility into agent identity or intent
-- No policy engine for agent capabilities
+- EDR is necessary, not sufficient
 -->
 
 ---
@@ -118,21 +118,23 @@ Speaker notes:
 # Architecture Thesis
 
 > The agent **PROPOSES** actions.
-> An independent broker **DECIDES**.
+> An independent PEP **DECIDES**.
 > The kill switch **TERMINATES** without asking nicely.
 
+Model classifier is an advisor, not a boundary.
+
 ```
-Agent → Broker → PDP → (Allow/Deny/Approval) → Execute
-           ↓
-       Telemetry
+Agent → Broker (PEP) → PDP → (Allow/Deny/Approval) → Execute
+              ↓
+          Telemetry
 ```
 
 <!--
 Speaker notes:
-- Separation of concerns: agent proposes, broker enforces
+- Separation of concerns: agent proposes, PEP enforces
 - PDP evaluates against policy
 - Kill switch operates outside agent control
-- Every decision is logged
+- Classifier can inform, cannot enforce
 -->
 
 ---
@@ -140,7 +142,7 @@ Speaker notes:
 # Nine Invariants
 
 1. **Identity Separation** — Agent ≠ User
-2. **Attenuated Delegation** — Minimal credentials
+2. **Attenuated Delegation** — No raw user PAT
 3. **Complete Mediation** — Every action through broker
 4. **Least Agency** — Autonomy off by default
 5. **Capability Integrity** — Hash tool definitions
@@ -162,10 +164,10 @@ Speaker notes:
 
 ```
 1. Agent calls broker.read_file("/workspace/data.txt")
-2. Broker canonicalizes path, checks for traversal
+2. Broker canonicalizes path, rejects traversal
 3. Broker sends ActionRequest to PDP
-4. PDP queries Registry: is this agent known? active? approved?
-5. PDP checks permissions: can this agent read this path?
+4. PDP queries Registry: known? active? approved?
+5. PDP checks permissions: can this agent read here?
 6. PDP checks input trust: was input trusted?
 7. PDP returns: ALLOW / DENY / REQUIRE_APPROVAL
 8. Broker executes or returns error
@@ -181,45 +183,26 @@ Speaker notes:
 
 ---
 
-# Decision Outcomes
-
-| Decision | Meaning |
-|----------|---------|
-| **ALLOW** | Execute the action |
-| **DENY** | Reject immediately |
-| **REQUIRE_APPROVAL** | Wait for human |
-| **ALLOW_IN_SANDBOX** | Execute in isolation |
-| **ISSUE_EPHEMERAL_CREDENTIAL** | Provide scoped token |
-| **TERMINATE_AND_REVOKE** | Kill switch |
-
-<!--
-Speaker notes:
-- Six possible outcomes, not just allow/deny
-- REQUIRE_APPROVAL for sensitive operations
-- Human stays in the loop for high-risk actions
--->
-
----
-
 # Data Safety
 
-- **No raw long-lived secrets** — 5-minute tokens
+- **No raw user PAT** — 5-minute scoped tokens
 - **Default-deny egress** — Explicit allowlist
-- **Input provenance** — Trusted vs. untrusted
-- **Classification labels** — Control by sensitivity
+- **No raw shell** — Typed commands only
+- **Writes in approved roots** — Path validation
 - **Redacted telemetry** — No secrets in logs
 
 ```yaml
 permissions:
+  files_write: ["/approved/output"]
   network_allowlist: ["reports.internal.example"]
-  # All other egress denied
+  shell: false  # Always
 ```
 
 <!--
 Speaker notes:
 - Tokens expire in 5 minutes
 - Network egress is whitelist, not blacklist
-- Secrets are never written to logs
+- Shell is never a raw string endpoint
 -->
 
 ---
@@ -228,13 +211,13 @@ Speaker notes:
 
 Not a polite stop. A hard kill.
 
-1. **Suspend** component in registry
+1. **Suspend** component in registry (new actions fail)
 2. **Revoke** all tokens for agent
 3. **Terminate** task tree in broker
 4. **Hook** EDR isolate
 5. **Hook** egress deny
 
-Order matters. Registry first, so new actions fail.
+Order matters. Does not ask the agent nicely.
 
 <!--
 Speaker notes:
@@ -246,110 +229,90 @@ Speaker notes:
 
 ---
 
-# Components
+# MVP Components
 
 | Service | Port | Role |
 |---------|------|------|
 | Registry | 8081 | Component inventory |
 | PDP | 8082 | Policy decisions |
-| Identity | 8083 | Token management |
-| Broker | 8080 | Policy enforcement |
-| Approval | 8084 | Human-in-loop |
-| Telemetry | 8085 | Audit events |
+| Identity | 8083 | Scoped tokens |
+| Broker | 8080 | Typed PEP |
+| Approval | 8084 | Out-of-band human |
 | Kill Switch | 8086 | Emergency stop |
+| Telemetry | 8085 | Audit events |
+
+**Out of MVP**: Computer-use / GUI automation on user desktop
 
 <!--
 Speaker notes:
 - Each service has a single responsibility
-- Broker is the PEP - all actions flow through
-- PDP is the brain - makes decisions
-- Registry is the source of truth for components
+- Broker is the typed PEP - all actions flow through
+- Computer-use requires different controls
 -->
 
 ---
 
-# Deploy Path
+# Deploy Honestly
 
-| Phase | Focus |
-|-------|-------|
-| **Demo** | This reference implementation |
-| **Pilot** | Single team, non-production |
-| **Staging** | Add TLS, IdP, monitoring |
-| **Production** | Full HA, real EDR/egress hooks |
+**Compose is demo.** Production is integration.
 
-**MVP scope**: Teaching system, not drop-in EDR.
+| Demo | Production |
+|------|------------|
+| In-memory JWT | RFC 8693 token exchange with IdP |
+| Logged EDR hooks | Real EDR API integration |
+| Logged egress hooks | Real firewall rules |
+| No TLS | TLS everywhere |
+| Single instance | HA cluster |
+
+This runs **next to** EDR/IdP/DLP. Not a replacement.
 
 <!--
 Speaker notes:
-- Start with reference implementation for learning
-- Pilot with low-risk use cases
-- Add production requirements incrementally
-- This is a teaching system, not a product
+- Be honest about what you're shipping
+- Compose demonstrates the architecture
+- Production requires real integrations
+- This adds a layer, doesn't replace existing
 -->
 
 ---
 
-# 90-Day Plan
+# 90-Day Ask
 
-**Days 1-30**: Foundation
+**Days 1-30**: Inventory and Contain
 - Deploy reference implementation
-- Integrate with IdP (RFC 8693)
-- Set up monitoring
+- Catalog existing agents and skills
+- Define approved roots and egress allowlist
 
-**Days 31-60**: Pilot
-- Onboard pilot team
-- Tune policies from telemetry
+**Days 31-60**: Integrate
+- Connect to IdP (RFC 8693)
+- Wire EDR isolate hooks
 - Build approval workflows
 
-**Days 61-90**: Expand
-- Production hardening
-- EDR/egress integration
-- Scale to more teams
+**Days 61-90**: One Coding Agent
+- Put one approved coding agent behind the control plane
+- Monitor, tune, document
+- Expand to next agent
 
 <!--
 Speaker notes:
-- 30 days to get foundation right
-- 30 days to learn from real usage
-- 30 days to harden for production
-- This is a journey, not a deployment
--->
-
----
-
-# What This Is
-
-✅ Working reference implementation
-✅ Demonstration of architecture thesis
-✅ Testbed for policy patterns
-✅ Starting point for production
-
-# What This Is Not
-
-❌ Drop-in EDR replacement
-❌ Complete production system
-❌ Vendor product
-
-<!--
-Speaker notes:
-- Be clear about what you're getting
-- This is a teaching tool and starting point
-- Production requires additional work
-- No vendor lock-in - build your own
+- Start with visibility: what agents exist?
+- Then add controls around one agent
+- Learn before expanding
+- 90 days to first controlled agent
 -->
 
 ---
 
 # Questions?
 
-**Repository**: This repo
-**Documentation**: `docs/` folder
-**Demo**: `make demo`
-
 ```bash
-make test    # Run tests
-make up      # Start services
+make test    # Run tests (72 passing)
+make up      # Start services (Docker Compose)
 make demo    # Run demo scenarios
 ```
+
+**Docs**: `docs/01-problem.md` through `docs/06-operator-runbook.md`
+**Deck**: `presentation/index.html` (self-contained)
 
 <!--
 Speaker notes:

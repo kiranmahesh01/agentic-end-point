@@ -146,7 +146,7 @@ The demo agent demonstrates five key scenarios:
 
 ## Status
 
-**Reference Implementation** — This is a production-shaped teaching system, not a drop-in EDR replacement.
+**Reference Implementation** — Compose is demo. Production is integration next to EDR/IdP/DLP, not a replacement.
 
 ### What This Is
 
@@ -157,18 +157,19 @@ The demo agent demonstrates five key scenarios:
 
 ### What This Is Not
 
-- A replacement for EDR (use your existing EDR)
+- A replacement for EDR (EDR stays mandatory)
 - A complete production system (missing HA, TLS, real IdP integration)
 - A vendor product (vendor-neutral reference implementation)
 
-### Simulated Components
+### Demo vs. Production
 
-The following are simulated in the reference implementation:
-- IdP integration (uses in-memory JWT; production uses RFC 8693 token exchange)
-- EDR hooks (logged, not executed)
-- Egress firewall hooks (logged, not executed)
-- File operations (simulated, not real filesystem)
-- Redis for token revocation (uses in-memory set)
+| Demo (This Repo) | Production |
+|-----------------|------------|
+| In-memory JWT | RFC 8693 token exchange with IdP |
+| Logged EDR hooks | Real EDR API integration |
+| Logged egress hooks | Real firewall rules |
+| No TLS | TLS everywhere |
+| Single instance | HA cluster |
 
 ### Out of Scope for MVP
 
@@ -177,6 +178,23 @@ The following are simulated in the reference implementation:
 - Production IdP integration
 - High availability / clustering
 - TLS termination
+
+## 90-Day Ask
+
+**Days 1-30: Inventory and Contain**
+- Deploy reference implementation
+- Catalog existing agents and skills
+- Define approved roots and egress allowlist
+
+**Days 31-60: Integrate**
+- Connect to IdP (RFC 8693)
+- Wire EDR isolate hooks
+- Build approval workflows
+
+**Days 61-90: One Coding Agent**
+- Put one approved coding agent behind the control plane
+- Monitor, tune, document
+- Expand to next agent
 
 ## References
 

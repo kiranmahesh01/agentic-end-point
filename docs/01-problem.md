@@ -72,13 +72,15 @@ The OWASP Top 10 for Agentic Applications (released December 9, 2025) identifies
 
 ### EchoLeak (CVE-2025-32711)
 
-A patched zero-click indirect prompt-injection vulnerability in Microsoft 365 Copilot demonstrated how:
+A **patched** zero-click indirect prompt-injection vulnerability in Microsoft 365 Copilot demonstrated how:
 - An attacker could embed instructions in a document
 - When a user asked Copilot to summarize the document
 - Copilot would execute the embedded instructions
 - Sensitive information could be exfiltrated
 
 This vulnerability was **UI:N** (no user interaction required beyond normal document processing).
+
+**Note**: This is a patched vulnerability that demonstrates the attack class. It is NOT a confirmed in-the-wild breach.
 
 ### Tool Definition Poisoning
 

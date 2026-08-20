@@ -1,5 +1,16 @@
 # 05 - Deployment Guide
 
+## Deploy Honestly
+
+**Compose is demo.** Production is integration next to EDR/IdP/DLP, not a replacement.
+
+This reference implementation demonstrates the architecture. Production deployment requires:
+- Real IdP integration (RFC 8693 token exchange)
+- Real EDR API calls (not just logged hooks)
+- Real firewall rules (not just logged hooks)
+- TLS everywhere
+- High availability
+
 ## Local Development
 
 ### Prerequisites

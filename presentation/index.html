@@ -309,6 +309,13 @@
             font-size: 0.9rem;
         }
 
+        .note {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-top: 10px;
+        }
+
         @media (max-width: 768px) {
             .slide { padding: 30px; }
             h1 { font-size: 2.5rem; }
@@ -329,20 +336,20 @@
     <!-- Slide 2: The Problem -->
     <section class="slide" id="slide-2">
         <h2>The Problem</h2>
-        <p>AI agents act under your identity. When compromised, they have your credentials.</p>
-        <p class="highlight" style="font-size: 1.8rem; margin-top: 30px;">Compromise is a sentence, not a binary.</p>
+        <p>Agents on endpoints misuse legitimate tools and valid credentials.</p>
+        <p class="highlight" style="font-size: 1.8rem; margin-top: 30px;">The exploit is often a sentence—not malware.</p>
         <div class="grid" style="margin-top: 40px;">
             <div class="card">
                 <h3>Goal Hijacking</h3>
-                <p>A prompt injection in processed data causes the agent to work for the attacker.</p>
+                <p>A prompt injection causes the agent to work for the attacker using the user's tools.</p>
             </div>
             <div class="card">
-                <h3>Tool Poisoning</h3>
+                <h3>Poisoned Skill</h3>
                 <p>A malicious tool definition loaded from a repository executes attacker code.</p>
             </div>
             <div class="card">
-                <h3>Credential Theft</h3>
-                <p>Over-delegated credentials give attackers full account access.</p>
+                <h3>Inherited Token</h3>
+                <p>The agent inherits the user's PAT and exfiltrates it via legitimate APIs.</p>
             </div>
         </div>
     </section>
@@ -376,27 +383,28 @@
             </tr>
             <tr>
                 <td>Tool Poisoning</td>
-                <td>Malicious tool definition</td>
+                <td>Malicious skill definition</td>
                 <td>Arbitrary code execution</td>
             </tr>
             <tr>
-                <td>Credential Theft</td>
+                <td>Token Inheritance</td>
                 <td>Over-delegated PAT</td>
                 <td>Full account compromise</td>
             </tr>
             <tr>
-                <td>Data Exfiltration</td>
-                <td>Confused deputy</td>
+                <td>Confused Deputy</td>
+                <td>Trusted agent, bad input</td>
                 <td>Secrets sent to attacker</td>
             </tr>
         </table>
-        <p style="margin-top: 30px;"><strong>CVE-2025-32711 (EchoLeak)</strong>: Zero-click prompt injection in Microsoft 365 Copilot</p>
+        <p style="margin-top: 30px;"><strong>CVE-2025-32711 (EchoLeak)</strong>: Patched zero-click vulnerability in Copilot</p>
+        <p class="note">Not a confirmed in-the-wild breach. Demonstrates the attack class.</p>
     </section>
 
     <!-- Slide 5: Why EDR Is Not Enough -->
     <section class="slide" id="slide-5">
         <h2>Why EDR Is Not Enough</h2>
-        <p>EDR sees the user's process. EDR cannot see:</p>
+        <p><strong>EDR stays mandatory.</strong> EDR sees the user's process. EDR cannot see:</p>
         <div class="grid">
             <div class="card">
                 <h3>Agent Identity</h3>
@@ -412,7 +420,7 @@
             </div>
             <div class="card">
                 <h3>Tool Integrity</h3>
-                <p>Has the tool definition been modified?</p>
+                <p>Has the skill definition been modified?</p>
             </div>
             <div class="card">
                 <h3>Scope Boundaries</h3>
@@ -433,16 +441,17 @@
                 The agent <span class="highlight">PROPOSES</span> actions.
             </p>
             <p style="font-size: 1.4rem; text-align: center; margin-bottom: 20px;">
-                An independent broker <span style="color: var(--accent-blue); font-weight: 600;">DECIDES</span>.
+                An independent PEP <span style="color: var(--accent-blue); font-weight: 600;">DECIDES</span>.
             </p>
             <p style="font-size: 1.4rem; text-align: center;">
                 The kill switch <span style="color: var(--accent-green); font-weight: 600;">TERMINATES</span> without asking nicely.
             </p>
         </div>
+        <p style="text-align: center; color: var(--text-secondary);">Model classifier is an advisor, not a boundary.</p>
         <div class="flow-diagram">
             <div class="flow-box">Agent</div>
             <span class="flow-arrow">→</span>
-            <div class="flow-box">Broker</div>
+            <div class="flow-box">Broker (PEP)</div>
             <span class="flow-arrow">→</span>
             <div class="flow-box">PDP</div>
             <span class="flow-arrow">→</span>
@@ -499,10 +508,10 @@
         <h2>How an Action Is Mediated</h2>
         <ol class="list numbered">
             <li>Agent calls <code>broker.read_file("/workspace/data.txt")</code></li>
-            <li>Broker canonicalizes path, checks for traversal</li>
+            <li>Broker canonicalizes path, rejects traversal</li>
             <li>Broker sends ActionRequest to PDP</li>
-            <li>PDP queries Registry: is this agent known? active? approved?</li>
-            <li>PDP checks permissions: can this agent read this path?</li>
+            <li>PDP queries Registry: known? active? approved?</li>
+            <li>PDP checks permissions: can this agent read here?</li>
             <li>PDP checks input trust: was input trusted?</li>
             <li>PDP returns: <span class="badge allow">ALLOW</span> / <span class="badge deny">DENY</span> / <span class="badge approval">REQUIRE_APPROVAL</span></li>
             <li>Broker executes or returns error</li>
@@ -510,192 +519,169 @@
         </ol>
     </section>
 
-    <!-- Slide 9: Decision Outcomes -->
+    <!-- Slide 9: Data Safety -->
     <section class="slide" id="slide-9">
-        <h2>Decision Outcomes</h2>
-        <table>
-            <tr>
-                <th>Decision</th>
-                <th>Meaning</th>
-                <th>Action</th>
-            </tr>
-            <tr>
-                <td><span class="badge allow">ALLOW</span></td>
-                <td>Action permitted</td>
-                <td>Execute the action</td>
-            </tr>
-            <tr>
-                <td><span class="badge deny">DENY</span></td>
-                <td>Action forbidden</td>
-                <td>Reject immediately</td>
-            </tr>
-            <tr>
-                <td><span class="badge approval">REQUIRE_APPROVAL</span></td>
-                <td>Human approval needed</td>
-                <td>Wait for approval</td>
-            </tr>
-            <tr>
-                <td style="color: var(--accent-purple);">ALLOW_IN_SANDBOX</td>
-                <td>Permitted in isolation</td>
-                <td>Execute in sandbox</td>
-            </tr>
-            <tr>
-                <td style="color: var(--accent-blue);">ISSUE_CREDENTIAL</td>
-                <td>Scoped token needed</td>
-                <td>Provide limited token</td>
-            </tr>
-            <tr>
-                <td style="color: var(--accent-red);">TERMINATE</td>
-                <td>Emergency stop</td>
-                <td>Kill switch activated</td>
-            </tr>
-        </table>
-    </section>
-
-    <!-- Slide 10: Data Safety -->
-    <section class="slide" id="slide-10">
         <h2>Data Safety</h2>
         <div class="grid">
             <div class="card">
-                <h3>No Long-Lived Secrets</h3>
-                <p>Tokens expire in 5 minutes. No PAT passthrough. Scoped to task and intent.</p>
+                <h3>No Raw User PAT</h3>
+                <p>5-minute scoped tokens. Never relay user credentials.</p>
             </div>
             <div class="card">
                 <h3>Default-Deny Egress</h3>
-                <p>Network access requires explicit allowlist entry. All other egress blocked.</p>
+                <p>Network access requires explicit allowlist entry.</p>
             </div>
             <div class="card">
-                <h3>Input Provenance</h3>
-                <p>Trusted vs. untrusted input labeled. Untrusted + exec = DENY.</p>
+                <h3>No Raw Shell</h3>
+                <p>Typed commands only. Never a shell string endpoint.</p>
             </div>
             <div class="card">
-                <h3>Redacted Telemetry</h3>
-                <p>Secrets, API keys, and chain-of-thought never logged.</p>
+                <h3>Approved Roots Only</h3>
+                <p>Writes only to approved paths. Path traversal rejected.</p>
             </div>
+        </div>
+        <div class="code-block" style="margin-top: 20px;">
+permissions:<br>
+  files_write: ["/approved/output"]<br>
+  network_allowlist: ["reports.internal.example"]<br>
+  shell: false  # Always
         </div>
     </section>
 
-    <!-- Slide 11: Kill Switch -->
-    <section class="slide" id="slide-11">
+    <!-- Slide 10: Kill Switch -->
+    <section class="slide" id="slide-10">
         <h2>Kill Switch</h2>
-        <p style="font-size: 1.3rem; margin-bottom: 30px;">Not a polite stop. A hard kill. Order matters.</p>
+        <p style="font-size: 1.3rem; margin-bottom: 30px;">Not a polite stop. A hard kill. Does not ask the agent nicely.</p>
         <ol class="list numbered">
-            <li><strong>Suspend</strong> component in registry (new actions fail)</li>
-            <li><strong>Revoke</strong> all tokens for agent (credentials invalid)</li>
-            <li><strong>Terminate</strong> task tree in broker (in-flight work stops)</li>
-            <li><strong>Hook</strong> EDR isolate (endpoint isolated)</li>
-            <li><strong>Hook</strong> egress deny (network blocked)</li>
+            <li><strong>Suspend</strong> component in registry (new actions fail immediately)</li>
+            <li><strong>Revoke</strong> all tokens for agent</li>
+            <li><strong>Terminate</strong> task tree in broker</li>
+            <li><strong>Hook</strong> EDR isolate</li>
+            <li><strong>Hook</strong> egress deny</li>
         </ol>
-        <p style="margin-top: 30px; color: var(--accent-red);">The kill switch does NOT send "please stop" to the agent.</p>
+        <p style="margin-top: 30px; color: var(--accent-red);">Order matters. Registry first, so new actions fail before tokens are revoked.</p>
     </section>
 
-    <!-- Slide 12: Deploy Path -->
+    <!-- Slide 11: MVP Components -->
+    <section class="slide" id="slide-11">
+        <h2>MVP Components</h2>
+        <table>
+            <tr>
+                <th>Service</th>
+                <th>Port</th>
+                <th>Role</th>
+            </tr>
+            <tr>
+                <td>Registry</td>
+                <td>8081</td>
+                <td>Component inventory</td>
+            </tr>
+            <tr>
+                <td>PDP</td>
+                <td>8082</td>
+                <td>Policy decisions</td>
+            </tr>
+            <tr>
+                <td>Identity</td>
+                <td>8083</td>
+                <td>Scoped tokens</td>
+            </tr>
+            <tr>
+                <td>Broker</td>
+                <td>8080</td>
+                <td>Typed PEP</td>
+            </tr>
+            <tr>
+                <td>Approval</td>
+                <td>8084</td>
+                <td>Out-of-band human</td>
+            </tr>
+            <tr>
+                <td>Kill Switch</td>
+                <td>8086</td>
+                <td>Emergency stop</td>
+            </tr>
+            <tr>
+                <td>Telemetry</td>
+                <td>8085</td>
+                <td>Audit events</td>
+            </tr>
+        </table>
+        <p style="margin-top: 20px; color: var(--text-secondary);"><strong>Out of MVP:</strong> Computer-use / GUI automation on user desktop</p>
+    </section>
+
+    <!-- Slide 12: Deploy Honestly -->
     <section class="slide" id="slide-12">
-        <h2>Deploy Path</h2>
-        <div class="timeline">
-            <div class="timeline-item">
-                <div class="timeline-phase">Demo</div>
-                <div class="timeline-content">
-                    <p>This reference implementation. Learn the architecture. Run demos.</p>
-                </div>
-            </div>
-            <div class="timeline-item">
-                <div class="timeline-phase">Pilot</div>
-                <div class="timeline-content">
-                    <p>Single team, non-production. Learn from real usage. Tune policies.</p>
-                </div>
-            </div>
-            <div class="timeline-item">
-                <div class="timeline-phase">Staging</div>
-                <div class="timeline-content">
-                    <p>Add TLS, IdP integration, monitoring. Test failure modes.</p>
-                </div>
-            </div>
-            <div class="timeline-item">
-                <div class="timeline-phase">Production</div>
-                <div class="timeline-content">
-                    <p>Full HA, real EDR/egress hooks. Scale to all teams.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Slide 13: 90-Day Plan -->
-    <section class="slide" id="slide-13">
-        <h2>90-Day Plan</h2>
-        <div class="grid">
-            <div class="card">
-                <h3>Days 1-30: Foundation</h3>
-                <ul class="list" style="font-size: 1rem;">
-                    <li>Deploy reference implementation</li>
-                    <li>Integrate with IdP (RFC 8693)</li>
-                    <li>Set up monitoring stack</li>
-                    <li>Document policies</li>
-                </ul>
-            </div>
-            <div class="card">
-                <h3>Days 31-60: Pilot</h3>
-                <ul class="list" style="font-size: 1rem;">
-                    <li>Onboard pilot team</li>
-                    <li>Tune policies from telemetry</li>
-                    <li>Build approval workflows</li>
-                    <li>Practice kill switch</li>
-                </ul>
-            </div>
-            <div class="card">
-                <h3>Days 61-90: Expand</h3>
-                <ul class="list" style="font-size: 1rem;">
-                    <li>Production hardening</li>
-                    <li>EDR/egress integration</li>
-                    <li>Scale to more teams</li>
-                    <li>Automate onboarding</li>
-                </ul>
-            </div>
-        </div>
-    </section>
-
-    <!-- Slide 14: What This Is -->
-    <section class="slide" id="slide-14">
-        <h2>What This Is</h2>
+        <h2>Deploy Honestly</h2>
+        <p style="font-size: 1.3rem; margin-bottom: 20px;"><strong>Compose is demo.</strong> Production is integration.</p>
         <div class="two-column">
             <div>
-                <h3 style="color: var(--accent-green);">✓ What It Is</h3>
+                <h3 style="color: var(--accent-yellow);">Demo (This Repo)</h3>
                 <ul class="list">
-                    <li>Working reference implementation</li>
-                    <li>Demonstration of architecture thesis</li>
-                    <li>Testbed for policy patterns</li>
-                    <li>Starting point for production</li>
-                    <li>Vendor-neutral design</li>
+                    <li>In-memory JWT</li>
+                    <li>Logged EDR hooks</li>
+                    <li>Logged egress hooks</li>
+                    <li>No TLS</li>
+                    <li>Single instance</li>
                 </ul>
             </div>
             <div>
-                <h3 style="color: var(--accent-red);">✗ What It Is Not</h3>
+                <h3 style="color: var(--accent-green);">Production</h3>
                 <ul class="list">
-                    <li>Drop-in EDR replacement</li>
-                    <li>Complete production system</li>
-                    <li>Vendor product</li>
-                    <li>Real file/network operations</li>
-                    <li>High-availability cluster</li>
+                    <li>RFC 8693 token exchange with IdP</li>
+                    <li>Real EDR API integration</li>
+                    <li>Real firewall rules</li>
+                    <li>TLS everywhere</li>
+                    <li>HA cluster</li>
                 </ul>
+            </div>
+        </div>
+        <p style="margin-top: 30px; text-align: center;">This runs <strong>next to</strong> EDR/IdP/DLP. Not a replacement.</p>
+    </section>
+
+    <!-- Slide 13: 90-Day Ask -->
+    <section class="slide" id="slide-13">
+        <h2>90-Day Ask</h2>
+        <div class="timeline">
+            <div class="timeline-item">
+                <div class="timeline-phase">Days 1-30</div>
+                <div class="timeline-content">
+                    <h3 style="margin-bottom: 10px;">Inventory and Contain</h3>
+                    <p style="font-size: 1rem;">Deploy reference implementation. Catalog existing agents and skills. Define approved roots and egress allowlist.</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-phase">Days 31-60</div>
+                <div class="timeline-content">
+                    <h3 style="margin-bottom: 10px;">Integrate</h3>
+                    <p style="font-size: 1rem;">Connect to IdP (RFC 8693). Wire EDR isolate hooks. Build approval workflows.</p>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-phase">Days 61-90</div>
+                <div class="timeline-content">
+                    <h3 style="margin-bottom: 10px;">One Coding Agent</h3>
+                    <p style="font-size: 1rem;">Put one approved coding agent behind the control plane. Monitor, tune, document. Expand to next agent.</p>
+                </div>
             </div>
         </div>
     </section>
 
-    <!-- Slide 15: Questions -->
-    <section class="slide title-slide" id="slide-15">
+    <!-- Slide 14: Questions -->
+    <section class="slide title-slide" id="slide-14">
         <h1>Questions?</h1>
         <div class="code-block" style="display: inline-block; margin-top: 40px;">
-make test    # Run tests<br>
-make up      # Start services<br>
+make test    # Run tests (72 passing)<br>
+make up      # Start services (Docker Compose)<br>
 make demo    # Run demo scenarios
         </div>
         <p style="margin-top: 40px; color: var(--text-secondary);">
-            Documentation in <code>docs/</code> | Demo in <code>scripts/demo.sh</code>
+            Docs: <code>docs/01-problem.md</code> through <code>docs/06-operator-runbook.md</code>
         </p>
     </section>
 
     <div class="slide-number">
-        <span id="current-slide">1</span> / 15
+        <span id="current-slide">1</span> / 14
     </div>
 
     <nav>
@@ -705,7 +691,7 @@ make demo    # Run demo scenarios
 
     <script>
         let currentSlide = 1;
-        const totalSlides = 15;
+        const totalSlides = 14;
 
         function updateSlideNumber() {
             document.getElementById('current-slide').textContent = currentSlide;
