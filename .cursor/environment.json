@@ -1,0 +1,49 @@
+{
+  "name": "Agentic Endpoint Security",
+  "user": "ubuntu",
+  "install": "python3 -m pip install -e \".[dev]\"",
+  "terminals": [
+    {
+      "name": "registry",
+      "command": "python3 -m uvicorn services.registry.app:app --host 0.0.0.0 --port 8081"
+    },
+    {
+      "name": "telemetry",
+      "command": "python3 -m uvicorn services.telemetry.app:app --host 0.0.0.0 --port 8085"
+    },
+    {
+      "name": "identity",
+      "command": "python3 -m uvicorn services.identity.app:app --host 0.0.0.0 --port 8083"
+    },
+    {
+      "name": "pdp",
+      "command": "python3 -m uvicorn services.pdp.app:app --host 0.0.0.0 --port 8082"
+    },
+    {
+      "name": "approval",
+      "command": "python3 -m uvicorn services.approval.app:app --host 0.0.0.0 --port 8084"
+    },
+    {
+      "name": "broker",
+      "command": "python3 -m uvicorn services.broker.app:app --host 0.0.0.0 --port 8080"
+    },
+    {
+      "name": "killswitch",
+      "command": "python3 -m uvicorn services.killswitch.app:app --host 0.0.0.0 --port 8086"
+    },
+    {
+      "name": "demo-agent",
+      "command": "python3 -m uvicorn services.demo_agent.app:app --host 0.0.0.0 --port 8090"
+    }
+  ],
+  "ports": [
+    { "name": "broker", "port": 8080 },
+    { "name": "registry", "port": 8081 },
+    { "name": "pdp", "port": 8082 },
+    { "name": "identity", "port": 8083 },
+    { "name": "approval", "port": 8084 },
+    { "name": "telemetry", "port": 8085 },
+    { "name": "killswitch", "port": 8086 },
+    { "name": "demo-agent", "port": 8090 }
+  ]
+}
