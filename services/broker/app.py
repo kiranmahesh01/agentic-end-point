@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import HTMLResponse
 
 from packages.common.models import ActionRequest, ActionResponse, Decision, InputTrust
 from packages.common.path_safety import canonicalize_path, is_path_safe, is_within_roots
@@ -203,6 +204,43 @@ def _is_class_a_operation(operation: str, path: str) -> bool:
     canonical = canonicalize_path(path)
     within, _ = is_within_roots(canonical, APPROVED_READ_ROOTS)
     return within
+
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Agentic Endpoint Security</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; background:#0b1220; color:#e8eefc; margin:0; }
+    main { max-width: 720px; margin: 48px auto; padding: 0 24px; }
+    h1 { font-size: 1.6rem; }
+    a { color:#8cdcff; }
+    .ok { color:#5ee0a0; }
+    code { background:#1a2438; padding:2px 6px; border-radius:4px; }
+    li { margin: 8px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="ok">Broker is up.</p>
+  <h1>Agentic Endpoint Security</h1>
+  <p>The agent proposes. This PEP decides. No page at <code>/</code> used to exist — that is why the browser looked broken.</p>
+  <ul>
+    <li><a href="/docs">Broker API docs</a></li>
+    <li><a href="/health">Broker health</a></li>
+    <li><a href="http://127.0.0.1:8090/docs">Demo agent</a></li>
+    <li><a href="http://127.0.0.1:8082/docs">PDP</a></li>
+    <li><a href="http://127.0.0.1:8086/docs">Kill switch</a></li>
+    <li><a href="http://127.0.0.1:8084/docs">Approvals</a></li>
+  </ul>
+</main>
+</body>
+</html>"""
 
 
 @app.get("/health")

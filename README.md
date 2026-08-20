@@ -169,6 +169,9 @@ The demo agent demonstrates five key scenarios plus real isolation:
 - [04 - Architecture](docs/04-architecture.md) — Components and failure modes
 - [05 - Deployment](docs/05-deployment.md) — Local, staging, production
 - [06 - Operator Runbook](docs/06-operator-runbook.md) — Day-to-day operations
+- [07 - What we built](docs/07-what-we-built.md) — What shipped on 20 Aug 2026, owner decisions, honest limits
+- [08 - Mac runbook](docs/08-mac-runbook.md) — Colima + Docker on this laptop
+- [Presentation](presentation/index.html) — 14-slide exec deck
 
 ## Status: Deploy Honestly
 
