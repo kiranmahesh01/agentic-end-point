@@ -20,6 +20,8 @@ ENV SANDBOX_DISPLAY=:99
 ENV HOST_DISPLAY=""
 
 COPY pyproject.toml .
+COPY README.md .
+COPY LICENSE .
 COPY packages/ packages/
 COPY services/isolated_desktop/ services/isolated_desktop/
 

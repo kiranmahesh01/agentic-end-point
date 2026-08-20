@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
+COPY README.md .
+COPY LICENSE .
 COPY packages/ packages/
 COPY services/egress_proxy/ services/egress_proxy/
 

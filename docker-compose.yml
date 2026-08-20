@@ -50,7 +50,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -75,7 +75,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8443/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -103,7 +103,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -136,7 +136,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -155,7 +155,7 @@ services:
     depends_on:
       - pdp
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -177,7 +177,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8087/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -204,7 +204,7 @@ services:
       - ./certs:/app/certs:ro
     privileged: true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8088/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -231,7 +231,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8089/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -273,7 +273,7 @@ services:
       isolated-desktop:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -295,7 +295,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -319,7 +319,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8085/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -362,7 +362,7 @@ services:
       egress-proxy:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -393,7 +393,7 @@ services:
       killswitch:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
       interval: 10s
       timeout: 5s
       retries: 3
