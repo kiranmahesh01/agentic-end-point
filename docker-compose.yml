@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  registry:
+    build:
+      context: .
+      dockerfile: services/registry/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  pdp:
+    build:
+      context: .
+      dockerfile: services/pdp/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - REGISTRY_URL=http://registry:8081
+      - TELEMETRY_URL=http://telemetry:8085
+      - APPROVED_READ_ROOTS=/approved/workspace,/tmp/approved
+      - APPROVED_WRITE_ROOTS=/approved/output
+      - LOG_LEVEL=INFO
+    depends_on:
+      - registry
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  identity:
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - JWT_SECRET=dev-secret-change-in-production
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRY_SECONDS=300
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  broker:
+    build:
+      context: .
+      dockerfile: services/broker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PDP_URL=http://pdp:8082
+      - TELEMETRY_URL=http://telemetry:8085
+      - APPROVED_READ_ROOTS=/approved/workspace,/tmp/approved
+      - APPROVED_WRITE_ROOTS=/approved/output
+      - PDP_TIMEOUT_SECONDS=5
+      - LOCAL_CACHE_TTL_SECONDS=5
+      - LOG_LEVEL=INFO
+    depends_on:
+      - pdp
+      - telemetry
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  approval:
+    build:
+      context: .
+      dockerfile: services/approval/Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - APPROVAL_HMAC_SECRET=dev-hmac-secret-change-in-production
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  telemetry:
+    build:
+      context: .
+      dockerfile: services/telemetry/Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  killswitch:
+    build:
+      context: .
+      dockerfile: services/killswitch/Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      - REGISTRY_URL=http://registry:8081
+      - IDENTITY_URL=http://identity:8083
+      - BROKER_URL=http://broker:8080
+      - TELEMETRY_URL=http://telemetry:8085
+      - LOG_LEVEL=INFO
+    depends_on:
+      - registry
+      - identity
+      - broker
+      - telemetry
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  demo-agent:
+    build:
+      context: .
+      dockerfile: services/demo_agent/Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      - BROKER_URL=http://broker:8080
+      - IDENTITY_URL=http://identity:8083
+      - KILLSWITCH_URL=http://killswitch:8086
+      - LOG_LEVEL=INFO
+    depends_on:
+      - broker
+      - identity
+      - killswitch
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+networks:
+  agentic-net:
+    driver: bridge
