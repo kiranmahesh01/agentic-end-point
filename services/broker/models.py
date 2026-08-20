@@ -69,6 +69,30 @@ class LoadModelRequest(BaseAdapterRequest):
     version: str = Field(..., description="Model version")
 
 
+class AutomateUIRequest(BaseAdapterRequest):
+    """
+    Request to automate UI in the isolated sandbox.
+    
+    SAFETY: This NEVER drives the operator's real desktop.
+    All actions execute in an isolated Xvfb sandbox.
+    
+    Only templated RPA actions are allowed - no raw click/keystream.
+    """
+
+    action_template_id: str = Field(
+        ..., 
+        description="Template identifier (e.g. 'click_button', 'type_text')"
+    )
+    target_descriptor: str = Field(
+        ..., 
+        description="Target element descriptor (accessible name, xpath, etc.)"
+    )
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Template-specific parameters"
+    )
+
+
 class AdapterResponse(BaseModel):
     """Response from an adapter operation."""
 

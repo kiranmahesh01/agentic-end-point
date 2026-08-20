@@ -17,8 +17,8 @@ class TestKillSwitch:
     @patch("services.killswitch.app._suspend_in_registry")
     @patch("services.killswitch.app._revoke_tokens")
     @patch("services.killswitch.app._terminate_tasks")
-    @patch("services.killswitch.app._log_edr_isolate")
-    @patch("services.killswitch.app._log_egress_deny")
+    @patch("services.killswitch.app._edr_isolate")
+    @patch("services.killswitch.app._egress_block")
     @patch("services.killswitch.app._emit_kill_telemetry")
     def test_kill_switch_activation(
         self,
@@ -34,8 +34,8 @@ class TestKillSwitch:
         mock_suspend.return_value = (True, "Suspended")
         mock_revoke.return_value = (True, 5, "Tokens revoked")
         mock_terminate.return_value = (["task-1", "task-2"], [])
-        mock_edr.return_value = True
-        mock_egress.return_value = True
+        mock_edr.return_value = (True, {"success": True})
+        mock_egress.return_value = (True, {"success": True})
         mock_telemetry.return_value = None
 
         response = killswitch_client.post(
@@ -61,8 +61,8 @@ class TestKillSwitch:
     @patch("services.killswitch.app._suspend_in_registry")
     @patch("services.killswitch.app._revoke_tokens")
     @patch("services.killswitch.app._terminate_tasks")
-    @patch("services.killswitch.app._log_edr_isolate")
-    @patch("services.killswitch.app._log_egress_deny")
+    @patch("services.killswitch.app._edr_isolate")
+    @patch("services.killswitch.app._egress_block")
     @patch("services.killswitch.app._emit_kill_telemetry")
     def test_kill_switch_with_errors(
         self,
@@ -78,8 +78,8 @@ class TestKillSwitch:
         mock_suspend.return_value = (False, "Registry timeout")
         mock_revoke.return_value = (True, 3, "OK")
         mock_terminate.return_value = ([], ["Failed to terminate task-1"])
-        mock_edr.return_value = True
-        mock_egress.return_value = True
+        mock_edr.return_value = (True, {"success": True})
+        mock_egress.return_value = (True, {"success": True})
         mock_telemetry.return_value = None
 
         response = killswitch_client.post(
@@ -100,8 +100,8 @@ class TestKillSwitch:
     @patch("services.killswitch.app._suspend_in_registry")
     @patch("services.killswitch.app._revoke_tokens")
     @patch("services.killswitch.app._terminate_tasks")
-    @patch("services.killswitch.app._log_edr_isolate")
-    @patch("services.killswitch.app._log_egress_deny")
+    @patch("services.killswitch.app._edr_isolate")
+    @patch("services.killswitch.app._egress_block")
     @patch("services.killswitch.app._emit_kill_telemetry")
     def test_get_kill_status(
         self,
@@ -117,8 +117,8 @@ class TestKillSwitch:
         mock_suspend.return_value = (True, "OK")
         mock_revoke.return_value = (True, 1, "OK")
         mock_terminate.return_value = ([], [])
-        mock_edr.return_value = True
-        mock_egress.return_value = True
+        mock_edr.return_value = (True, {"success": True})
+        mock_egress.return_value = (True, {"success": True})
         mock_telemetry.return_value = None
 
         kill_response = killswitch_client.post(
@@ -139,8 +139,8 @@ class TestKillSwitch:
     @patch("services.killswitch.app._suspend_in_registry")
     @patch("services.killswitch.app._revoke_tokens")
     @patch("services.killswitch.app._terminate_tasks")
-    @patch("services.killswitch.app._log_edr_isolate")
-    @patch("services.killswitch.app._log_egress_deny")
+    @patch("services.killswitch.app._edr_isolate")
+    @patch("services.killswitch.app._egress_block")
     @patch("services.killswitch.app._emit_kill_telemetry")
     def test_list_kill_history(
         self,
@@ -156,8 +156,8 @@ class TestKillSwitch:
         mock_suspend.return_value = (True, "OK")
         mock_revoke.return_value = (True, 0, "OK")
         mock_terminate.return_value = ([], [])
-        mock_edr.return_value = True
-        mock_egress.return_value = True
+        mock_edr.return_value = (True, {"success": True})
+        mock_egress.return_value = (True, {"success": True})
         mock_telemetry.return_value = None
 
         for i in range(3):
@@ -179,3 +179,46 @@ class TestKillSwitch:
         """Test getting non-existent kill status."""
         response = killswitch_client.get("/v1/status/nonexistent")
         assert response.status_code == 404
+
+
+class TestKillSwitchIntegration:
+    """Integration tests for kill switch with real EDR/egress services."""
+
+    @patch("services.killswitch.app._suspend_in_registry")
+    @patch("services.killswitch.app._revoke_tokens")
+    @patch("services.killswitch.app._terminate_tasks")
+    @patch("services.killswitch.app._edr_isolate")
+    @patch("services.killswitch.app._egress_block")
+    @patch("services.killswitch.app._emit_kill_telemetry")
+    def test_kill_switch_calls_edr_and_egress(
+        self,
+        mock_telemetry,
+        mock_egress,
+        mock_edr,
+        mock_terminate,
+        mock_revoke,
+        mock_suspend,
+        killswitch_client: TestClient,
+    ):
+        """Test that kill switch actually calls EDR and egress services."""
+        mock_suspend.return_value = (True, "OK")
+        mock_revoke.return_value = (True, 1, "OK")
+        mock_terminate.return_value = ([], [])
+        mock_edr.return_value = (True, {"success": True, "actions_taken": ["Disconnected"]})
+        mock_egress.return_value = (True, {"success": True, "blocked": True})
+        mock_telemetry.return_value = None
+
+        response = killswitch_client.post(
+            "/v1/kill",
+            json={
+                "agent_id": "agent:demo-coder",
+                "task_ids": [],
+                "reason": "Integration test",
+                "initiated_by": "test",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["edr_isolate_logged"] is True
+        assert data["egress_deny_logged"] is True

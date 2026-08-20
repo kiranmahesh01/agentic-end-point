@@ -206,6 +206,51 @@ def check_shell_operation(request: ActionRequest) -> tuple[bool, str]:
     return True, "Shell operation format valid"
 
 
+HIGH_IMPACT_UI_TEMPLATES = {
+    "submit_form",
+    "close_window",
+    "download_file",
+    "execute_script",
+}
+
+
+def check_computer_use(
+    request: ActionRequest,
+    permissions: dict,
+) -> tuple[Decision | None, str]:
+    """
+    Check if computer-use (automate_ui) operation is allowed.
+    
+    Default DENY unless:
+    - Component has computer_use permission
+    - Template is in allowed list
+    - High-impact templates require approval
+    
+    SAFETY: This only controls access to the ISOLATED sandbox,
+    never the operator's real desktop.
+    """
+    if request.requested_operation != "automate_ui":
+        return None, "Not a computer-use operation"
+    
+    if not permissions.get("computer_use", False):
+        return Decision.DENY, "Computer-use not permitted for this component (default deny)"
+    
+    template_id = request.arguments.get("action_template_id", "")
+    
+    if not template_id:
+        return Decision.DENY, "automate_ui requires action_template_id (no raw click/keystream)"
+    
+    if "raw_click" in template_id or "raw_key" in template_id:
+        return Decision.DENY, "Raw click/keystream API not allowed - use templates only"
+    
+    if template_id in HIGH_IMPACT_UI_TEMPLATES:
+        approval_id = request.arguments.get("approval_id")
+        if not approval_id:
+            return Decision.REQUIRE_APPROVAL, f"High-impact UI template '{template_id}' requires OOB approval"
+    
+    return None, "Computer-use check passed"
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""
@@ -328,6 +373,26 @@ async def decide(request: ActionRequest) -> ActionResponse:
                 reason=egress_reason,
                 request_id=request_id,
             )
+
+    if request.requested_operation == "automate_ui":
+        cu_decision, cu_reason = check_computer_use(request, permissions)
+        if cu_decision is not None:
+            if cu_decision == Decision.DENY:
+                logger.warning(f"[{request_id}] DENY: {cu_reason}")
+                return ActionResponse(
+                    decision=Decision.DENY,
+                    reason=cu_reason,
+                    request_id=request_id,
+                )
+            elif cu_decision == Decision.REQUIRE_APPROVAL:
+                logger.info(f"[{request_id}] REQUIRE_APPROVAL: {cu_reason}")
+                approval_id = f"apr-{uuid.uuid4().hex[:12]}"
+                return ActionResponse(
+                    decision=Decision.REQUIRE_APPROVAL,
+                    reason=cu_reason,
+                    request_id=request_id,
+                    approval_id=approval_id,
+                )
 
     trust_decision, trust_reason = check_input_trust(request)
     if trust_decision is not None:

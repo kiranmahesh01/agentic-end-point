@@ -102,6 +102,54 @@ def demo_agent_client():
 
 
 @pytest.fixture
+def idp_client():
+    """Create a test client for the IdP service."""
+    from services.idp.app import app, _revoked_tokens
+
+    _revoked_tokens.clear()
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def egress_proxy_client():
+    """Create a test client for the egress proxy service."""
+    from services.egress_proxy.app import app, _allowlist, _blocked_agents, _deny_log
+
+    _allowlist.clear()
+    _allowlist.add("reports.internal.example")
+    _blocked_agents.clear()
+    _deny_log.clear()
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def edr_sensor_client():
+    """Create a test client for the EDR sensor service."""
+    from services.edr_sensor.app import app, _isolation_log, _isolated_containers
+
+    _isolation_log.clear()
+    _isolated_containers.clear()
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def isolated_desktop_client():
+    """Create a test client for the isolated desktop service."""
+    from services.isolated_desktop.app import app, _action_log
+
+    _action_log.clear()
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
 def valid_action_request():
     """Return a valid action request dict."""
     return {

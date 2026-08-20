@@ -111,8 +111,42 @@ def _seed_demo_components() -> None:
         updated_at=now,
     )
 
+    demo_rpa = Component(
+        id="agent:demo-rpa",
+        type=ComponentType.AGENT,
+        owner="demo-user",
+        purpose="Demonstration RPA agent for isolated desktop automation",
+        publisher="agentic-endpoint-security",
+        version="1.0.0",
+        content_hash="sha256:demo-rpa-content-hash-rpa123",
+        definition_hash="sha256:demo-rpa-definition-hash-rpa456",
+        signature_status="signed",
+        risk_tier=RiskTier.TIER_2,
+        approval_status=ApprovalStatus.APPROVED,
+        approval_expiry=now + timedelta(days=30),
+        permissions=Permissions(
+            files_read=["/approved/workspace"],
+            files_write=["/approved/output"],
+            shell=False,
+            network_allowlist=[],
+            secrets=[],
+            computer_use=True,
+        ),
+        autonomy=Autonomy(
+            can_execute_without_approval=False,
+            can_access_network=False,
+            can_modify_files=True,
+            can_spawn_processes=False,
+            can_access_secrets=False,
+        ),
+        lifecycle=LifecycleStatus.ACTIVE,
+        created_at=now,
+        updated_at=now,
+    )
+
     _components[demo_coder.id] = demo_coder
     _components[finance_skill.id] = finance_skill
+    _components[demo_rpa.id] = demo_rpa
     logger.info(f"Seeded {len(_components)} demo components")
 
 

@@ -2,14 +2,44 @@
 
 ## Deploy Honestly
 
-**Compose is demo.** Production is integration next to EDR/IdP/DLP, not a replacement.
+This reference implementation now includes **real working integrations**, not just logged hooks:
 
-This reference implementation demonstrates the architecture. Production deployment requires:
-- Real IdP integration (RFC 8693 token exchange)
-- Real EDR API calls (not just logged hooks)
-- Real firewall rules (not just logged hooks)
-- TLS everywhere
-- High availability
+| Feature | This Repo | Production Swap-In |
+|---------|-----------|-------------------|
+| TLS | ✅ Dev CA + mTLS (make certs) | Org CA |
+| IdP | ✅ Local IdP with RS256/JWKS | Org IdP via RFC 8693 |
+| Token Revocation | ✅ Redis-backed | Same Redis or org IdP |
+| Egress Control | ✅ Real proxy with default-deny | Org firewall API |
+| EDR Isolation | ✅ Real container isolation via Docker API | Vendor EDR API |
+| HA | ✅ PDP replicas + Redis shared state | K8s/ECS + managed Redis |
+| Offline Mode | ✅ Class D fail-closed | Same |
+| Computer-Use | ✅ Isolated Xvfb sandbox | Same (never operator desktop) |
+
+**Vendor EDR/IdP/firewall are still swap-in points**, but this repo now actually:
+- Issues RS256 JWTs from a local IdP with JWKS endpoint
+- Denies egress at the proxy level (not just logs)
+- Isolates containers via Docker API (not just logs)
+- Fails closed when PDP is unreachable
+- Shares revocation/approval/kill state via Redis
+
+## Quick Start
+
+```bash
+# Generate TLS certificates
+make certs
+
+# Start all services (with TLS stack)
+make up
+
+# Run demo scenarios
+make demo
+
+# Test kill switch (real isolation + egress block)
+make kill
+
+# Check all service health
+make health
+```
 
 ## Local Development
 
@@ -17,17 +47,27 @@ This reference implementation demonstrates the architecture. Production deployme
 
 - Python 3.12+
 - pip or uv package manager
-- Docker and Docker Compose (optional, for containerized deployment)
+- Docker and Docker Compose
+- OpenSSL (for certificate generation)
 
 ### Install Dependencies
 
 ```bash
-# Using pip
-pip install -e ".[dev]"
-
-# Or using make
 make install
 ```
+
+### Generate TLS Certificates
+
+```bash
+make certs
+```
+
+This creates a dev CA and per-service certificates in `./certs/`.
+
+To replace with organization CA:
+1. Replace `certs/ca.crt` with your org's CA certificate
+2. Generate new service certs signed by your CA
+3. Update SAN entries as needed for your DNS
 
 ### Run Tests
 
@@ -35,45 +75,39 @@ make install
 make test
 ```
 
-### Run Services Locally
-
-```bash
-# Start individual services (in separate terminals)
-uvicorn services.registry.app:app --port 8081
-uvicorn services.pdp.app:app --port 8082
-uvicorn services.identity.app:app --port 8083
-uvicorn services.broker.app:app --port 8080
-uvicorn services.approval.app:app --port 8084
-uvicorn services.telemetry.app:app --port 8085
-uvicorn services.killswitch.app:app --port 8086
-uvicorn services.demo_agent.app:app --port 8090
-```
-
-## Docker Compose
-
-### Start All Services
+### Run Services with Docker Compose
 
 ```bash
 make up
 ```
 
-This builds and starts all services:
+This starts all services:
 
-| Service | Port | URL |
-|---------|------|-----|
-| Registry | 8081 | http://localhost:8081 |
-| PDP | 8082 | http://localhost:8082 |
-| Identity | 8083 | http://localhost:8083 |
-| Broker | 8080 | http://localhost:8080 |
-| Approval | 8084 | http://localhost:8084 |
-| Telemetry | 8085 | http://localhost:8085 |
-| Kill Switch | 8086 | http://localhost:8086 |
-| Demo Agent | 8090 | http://localhost:8090 |
+| Service | Port | URL | Description |
+|---------|------|-----|-------------|
+| Registry | 8081 | http://localhost:8081 | Component inventory |
+| PDP (HA LB) | 8082 | http://localhost:8082 | Policy Decision Point |
+| Identity | 8083 | http://localhost:8083 | Token management |
+| Broker | 8080 | http://localhost:8080 | Policy Enforcement Point |
+| Approval | 8084 | http://localhost:8084 | OOB approvals |
+| Telemetry | 8085 | http://localhost:8085 | Event collection |
+| Kill Switch | 8086 | http://localhost:8086 | Emergency termination |
+| **IdP** | 8443 | http://localhost:8443 | Local IdP with JWKS |
+| **Egress Proxy** | 8087 | http://localhost:8087 | Real egress deny |
+| **EDR Sensor** | 8088 | http://localhost:8088 | Real container isolation |
+| **Isolated Desktop** | 8089 | http://localhost:8089 | Xvfb sandbox |
+| Demo Agent | 8090 | http://localhost:8090 | Test agent |
+| **Redis** | 6379 | redis://localhost:6379 | Shared state |
 
 ### View Logs
 
 ```bash
 make logs
+# Or specific services:
+make logs-pdp
+make logs-broker
+make logs-killswitch
+make logs-edr
 ```
 
 ### Stop Services
@@ -82,263 +116,270 @@ make logs
 make down
 ```
 
-### Run Demo
+## Architecture with Real Integrations
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        AGENTIC-NET (Docker)                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │  IdP    │    │ Redis   │    │ PDP x2  │◄─── Nginx LB         │
+│  │ (JWKS)  │    │(shared) │    │  (HA)   │                      │
+│  └────┬────┘    └────┬────┘    └────┬────┘                      │
+│       │              │              │                            │
+│  ┌────┴──────────────┴──────────────┴────┐                      │
+│  │              BROKER (PEP)             │                      │
+│  │  - Typed adapters only                │                      │
+│  │  - Offline fail-closed                │                      │
+│  │  - Policy cache for Class A           │                      │
+│  └───────────────────┬───────────────────┘                      │
+│                      │                                           │
+│  ┌───────────────────┼───────────────────┐                      │
+│  │                   │                   │                      │
+│  ▼                   ▼                   ▼                      │
+│  ┌─────────┐    ┌─────────┐    ┌─────────────┐                  │
+│  │ Egress  │    │  EDR    │    │  Isolated   │                  │
+│  │ Proxy   │    │ Sensor  │    │   Desktop   │                  │
+│  │ (deny)  │    │(Docker) │    │   (Xvfb)    │                  │
+│  └─────────┘    └─────────┘    └─────────────┘                  │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                      DEMO-AGENT                              ││
+│  │  (uses broker for all actions, can be isolated by kill)     ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## TLS Configuration
+
+### Certificate Generation
+
+The `make certs` command generates:
+- CA certificate (`certs/ca.crt`)
+- Per-service certificates and keys
+- SAN entries for Docker DNS names
+
+### mTLS Between Services
+
+All internal communication uses mTLS when `TLS_ENABLED=true`:
 
 ```bash
-make demo
+TLS_ENABLED=true make up
 ```
 
-## Staging Environment
+### Replacing with Organization CA
 
-### Additional Requirements
+1. Generate certificates signed by your org CA
+2. Place them in `./certs/` with same naming convention
+3. Update SAN entries for your DNS names
+4. Restart services
 
-For staging, add:
+## IdP Configuration
 
-- TLS certificates (self-signed or Let's Encrypt)
-- External PostgreSQL or Redis (for persistent storage)
-- Monitoring stack (Prometheus + Grafana)
+### Local IdP (Default)
 
-### Environment Variables
+The local IdP service provides:
+- RS256-signed JWTs (5-minute expiry)
+- JWKS endpoint at `/.well-known/jwks.json`
+- OpenID Connect discovery at `/.well-known/openid-configuration`
+- Token exchange endpoint (RFC 8693-compatible)
 
-Copy `.env.example` to `.env` and configure:
+### Production IdP Integration
 
-```bash
-# Staging environment
-JWT_SECRET=<strong-random-secret>
-APPROVAL_HMAC_SECRET=<strong-random-secret>
-LOG_LEVEL=INFO
-LOG_FORMAT=json
-```
-
-### Docker Compose Override
-
-Create `docker-compose.staging.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  broker:
-    environment:
-      - LOG_LEVEL=INFO
-      - PDP_TIMEOUT_SECONDS=10
-    deploy:
-      replicas: 2
-
-  pdp:
-    deploy:
-      replicas: 2
-```
-
-Run with:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-```
-
-## Production Environment
-
-### Critical Requirements
-
-| Requirement | Reference Implementation | Production |
-|-------------|-------------------------|------------|
-| TLS | None | Required (TLS 1.3) |
-| IdP Integration | In-memory JWT | RFC 8693 token exchange |
-| Token Revocation | In-memory set | Redis with TTL |
-| Persistence | In-memory | PostgreSQL/Redis |
-| HA | Single instance | Multi-instance + load balancer |
-| Secrets | .env file | Vault/K8s secrets |
-| Observability | Basic logging | OTEL + Prometheus + Grafana |
-| EDR Integration | Logged | Real EDR API |
-| Egress Control | Logged | Real firewall rules |
-
-### TLS Configuration
-
-All inter-service communication must use TLS:
-
-```yaml
-# Example nginx config for TLS termination
-server {
-    listen 443 ssl http2;
-    server_name broker.internal.example;
-    
-    ssl_certificate /etc/ssl/certs/broker.crt;
-    ssl_certificate_key /etc/ssl/private/broker.key;
-    ssl_protocols TLSv1.3;
-    
-    location / {
-        proxy_pass http://broker:8080;
-    }
-}
-```
-
-### IdP Integration
-
-Replace the identity service with org IdP integration:
-
-1. Configure RFC 8693 token exchange
-2. Set up agent identity claims in IdP
-3. Configure audience and scope validation
-4. Enable token revocation via IdP
-
-### Redis for Token Revocation
+For production, configure RFC 8693 token exchange:
 
 ```python
-# Production revocation with Redis
-import redis
-
-redis_client = redis.Redis(host='redis', port=6379, db=0)
-
-def revoke_token(jti: str, ttl: int = 300):
-    redis_client.setex(f"revoked:{jti}", ttl, "1")
-
-def is_token_revoked(jti: str) -> bool:
-    return redis_client.exists(f"revoked:{jti}")
-```
-
-### High Availability
-
-For HA deployment:
-
-1. Run multiple instances of each service
-2. Use load balancer with health checks
-3. Configure shared state (Redis/PostgreSQL)
-4. Set up cross-datacenter replication
-
-```yaml
-# Kubernetes example
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: broker
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: broker
-  template:
-    spec:
-      containers:
-      - name: broker
-        image: agentic-security/broker:latest
-        ports:
-        - containerPort: 8080
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-```
-
-### Secrets Management
-
-Use Vault or Kubernetes secrets:
-
-```yaml
-# Kubernetes secret example
-apiVersion: v1
-kind: Secret
-metadata:
-  name: agentic-secrets
-type: Opaque
-data:
-  JWT_SECRET: <base64-encoded>
-  APPROVAL_HMAC_SECRET: <base64-encoded>
-```
-
-### Observability
-
-Deploy full observability stack:
-
-1. **Metrics**: Prometheus + Grafana
-2. **Traces**: Jaeger/Zipkin (via OpenTelemetry)
-3. **Logs**: Loki or Elasticsearch
-4. **Alerts**: Alertmanager
-
-### EDR Integration
-
-Replace logged hooks with real EDR API calls:
-
-```python
-# Production EDR integration
-async def edr_isolate(endpoint_id: str, reason: str):
+# In production identity service
+async def exchange_token(user_token: str, agent_identity: str):
     async with httpx.AsyncClient() as client:
-        await client.post(
-            f"{EDR_API_URL}/v1/endpoints/{endpoint_id}/isolate",
-            json={"reason": reason},
-            headers={"Authorization": f"Bearer {EDR_API_TOKEN}"}
+        response = await client.post(
+            f"{ORG_IDP_URL}/oauth/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "subject_token": user_token,
+                "actor_token": agent_identity,
+                "audience": "agentic-endpoint-security",
+            }
         )
+        return response.json()
 ```
+
+## High Availability
+
+### PDP Replicas
+
+The compose file includes:
+- 2 PDP replicas
+- Nginx load balancer with health checks
+- Automatic failover (broker retries other replica)
+
+```yaml
+pdp:
+  deploy:
+    replicas: 2
+```
+
+### Redis Shared State
+
+All stateful services use Redis for:
+- Token revocation list
+- Approval queue
+- Kill switch state
+- Agent block list (egress proxy)
+
+### Testing HA
+
+```bash
+# Kill one PDP replica
+docker compose stop pdp-1
+
+# Verify decisions still work
+curl http://localhost:8082/health
+```
+
+## Egress Proxy
+
+### Default Deny
+
+The egress proxy enforces:
+- Allowlist only (default: `reports.internal.example`)
+- Per-agent blocking (kill switch integration)
+- Real 403 denials (not just logs)
+
+### Testing Egress Deny
+
+```bash
+# Check if destination is allowed
+curl "http://localhost:8087/v1/check?destination=evil.com&agent_id=test"
+# Returns: {"allowed": false, "reason": "Not in allowlist"}
+
+# Block an agent
+curl -X POST "http://localhost:8087/v1/block-agent?agent_id=agent:demo-coder"
+```
+
+## EDR Sensor
+
+### Container Isolation
+
+The EDR sensor can:
+- Pause/stop containers via Docker API
+- Disconnect containers from networks
+- Log all isolation events
+
+### Requirements
+
+Requires Docker socket mount (in compose):
+
+```yaml
+edr-sensor:
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  privileged: true
+```
+
+### Testing Isolation
+
+```bash
+# Isolate a container
+curl -X POST "http://localhost:8088/v1/isolate?agent_id=agent:demo-coder&container_name=demo-agent"
+
+# Check container status
+curl "http://localhost:8088/v1/status?container_name=demo-agent"
+```
+
+## Computer-Use (Isolated Desktop)
+
+### Safety Guarantees
+
+The isolated desktop service:
+- Runs in Xvfb (virtual framebuffer)
+- **NEVER** accesses the operator's real desktop
+- No `/dev/input` access
+- No host DISPLAY variable
+- Templated RPA only (no raw click/keystream)
+
+### High-Impact Templates
+
+Require OOB approval:
+- `submit_form`
+- `close_window`
+- `download_file`
+- `execute_script`
+
+### Testing
+
+```bash
+# List available templates
+curl http://localhost:8089/v1/templates
+
+# Execute a safe action
+curl -X POST http://localhost:8089/v1/execute \
+  -H "Content-Type: application/json" \
+  -d '{"template_id": "click_button", "target_descriptor": "Submit"}'
+```
+
+## Offline Mode (Class D)
+
+### Fail-Closed Behavior
+
+When PDP/identity is unreachable:
+- Class A reads from approved roots: **MAY proceed from cache**
+- All Class B/C operations: **FAIL CLOSED**
+  - No writes
+  - No egress
+  - No commands
+  - No model load
+  - No computer-use
+
+### Testing Offline Mode
+
+```bash
+# Stop PDP
+docker compose stop pdp
+
+# Try a write (should fail)
+# Try a read from approved root (should work from cache)
+```
+
+## Production Swap-In Points
+
+| This Repo | Production Replacement |
+|-----------|----------------------|
+| Local IdP | Okta/Azure AD/Google via RFC 8693 |
+| Redis | AWS ElastiCache / Azure Cache |
+| Egress Proxy | Palo Alto / Zscaler API |
+| EDR Sensor | CrowdStrike / Defender API |
+| Xvfb Sandbox | Same (isolated container) |
+| Docker Compose | Kubernetes / ECS |
 
 ## Demo vs. Production Checklist
 
-| Feature | Demo | Production |
-|---------|------|------------|
-| TLS | ❌ | ✅ Required |
-| Real IdP | ❌ | ✅ Required |
-| Redis revocation | ❌ | ✅ Required |
-| Persistent storage | ❌ | ✅ Required |
-| HA / clustering | ❌ | ✅ Required |
-| Real EDR hooks | ❌ | ✅ Required |
-| Real egress control | ❌ | ✅ Required |
-| Secrets management | .env | Vault |
-| Observability | Basic | Full stack |
-| Backup/recovery | ❌ | ✅ Required |
-
-## Rollback Procedures
-
-### Service Rollback
-
-```bash
-# Tag current working version
-docker tag broker:latest broker:last-known-good
-
-# If deployment fails
-docker compose down
-docker tag broker:last-known-good broker:latest
-docker compose up -d
-```
-
-### Database Rollback
-
-For schema changes, use migration tools:
-
-```bash
-# Alembic example
-alembic downgrade -1
-```
-
-### Kill Switch Rollback
-
-If kill switch was activated incorrectly:
-
-1. Reactivate component in registry
-2. Clear revocation list (if using Redis, keys expire)
-3. Clear terminated tasks in broker
-4. Restart affected agent instances
+| Feature | This Repo | Production |
+|---------|-----------|------------|
+| TLS/mTLS | ✅ Dev CA | ✅ Org CA |
+| IdP (RS256/JWKS) | ✅ Local | ✅ Org IdP |
+| Redis state | ✅ Local Redis | ✅ Managed Redis |
+| HA (PDP replicas) | ✅ 2 replicas | ✅ 3+ replicas |
+| Egress deny | ✅ Real proxy | ✅ Org firewall |
+| EDR isolate | ✅ Docker API | ✅ Vendor API |
+| Offline fail-closed | ✅ | ✅ |
+| Computer-use sandbox | ✅ | ✅ |
+| File operations | ❌ Simulated | ✅ Real |
+| Persistent storage | ❌ In-memory | ✅ Database |
 
 ## Limitations
 
 ### Reference Implementation Limitations
 
-- No real file operations (simulated)
-- No real network egress (simulated)
-- No real EDR integration (logged)
-- No persistent storage (in-memory)
-- Single instance (no HA)
-- No TLS (HTTP only)
+- File operations are simulated (no real file I/O)
+- Network egress through proxy is simulated (real deny, simulated forward)
+- No UI for approval workflow
+- No persistent database (Redis for state only)
 
-### Out of Scope for MVP
+### Out of Scope
 
-- Computer-use / GUI automation
-- Clipboard monitoring
-- Screenshot controls
 - Multi-tenant deployment
 - Billing/metering
-- UI for approval workflow
-
-### Known Issues
-
-1. Token revocation is in-memory (production needs Redis)
-2. Approval service has no notification system
-3. Telemetry has no retention/archival
-4. Registry has no versioned component history
+- Clipboard monitoring
+- Screenshot controls on operator desktop (computer-use is isolated only)

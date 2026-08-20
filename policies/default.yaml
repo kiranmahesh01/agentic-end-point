@@ -43,12 +43,19 @@ class_b_operations:
   - run_command
   - load_model
   - access_secret
+  - automate_ui  # Computer-use in isolated sandbox
 
 # Class C operations (require human approval)
 class_c_operations:
   - delete_file
   - execute_privileged
   - modify_system
+
+# Class D operations (offline mode - only Class A from cache allowed)
+class_d_notes: |
+  When PDP/identity is unreachable:
+  - Class A reads from approved roots: MAY proceed from cache
+  - All Class B/C operations: FAIL CLOSED (no writes, no egress, no commands, no model load, no computer-use)
 
 # Input trust rules
 input_trust_rules:
@@ -138,6 +145,29 @@ shell_rules:
   require_typed_commands: true
   # Shell disabled by default for all components
   default_shell_permission: false
+
+# Computer-use rules (automate_ui)
+# SAFETY: Computer-use NEVER drives the operator's real desktop.
+# All actions execute in an isolated Xvfb sandbox container.
+computer_use_rules:
+  # Default deny - component must have explicit computer_use permission
+  default: deny
+  # Only templated RPA actions - no raw click/keystream API
+  allow_raw_clicks: false
+  allow_raw_keystream: false
+  require_templates: true
+  # High-impact templates require OOB approval
+  high_impact_templates:
+    - submit_form
+    - close_window
+    - download_file
+    - execute_script
+  # Sandbox requirements
+  sandbox:
+    require_xvfb: true
+    no_host_display: true
+    no_dev_input: true
+    isolated_container: true
 
 # Approval requirements
 approval_rules:

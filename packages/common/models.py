@@ -74,6 +74,10 @@ class Permissions(BaseModel):
     shell: bool = False
     network_allowlist: list[str] = Field(default_factory=list)
     secrets: list[str] = Field(default_factory=list)
+    computer_use: bool = Field(
+        default=False,
+        description="Permission to use isolated desktop automation (never the operator's real desktop)"
+    )
 
 
 class Autonomy(BaseModel):

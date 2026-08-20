@@ -7,14 +7,14 @@ Emergency termination service for agents. This is the hard stop.
 
 The kill switch does NOT send a polite stop to the agent.
 It revokes tokens, suspends the component, terminates tasks,
-and hooks EDR isolate + egress deny.
+AND ACTUALLY isolates via EDR sensor + blocks egress via proxy.
 
 Order of operations:
 1. Registry: suspend component
 2. Identity: revoke all tokens for agent
 3. Broker: terminate task IDs
-4. Log EDR isolate hook (simulated)
-5. Log egress deny hook (simulated)
+4. EDR Sensor: REAL container isolation (pause + network disconnect)
+5. Egress Proxy: REAL egress block for this agent
 """
 
 import logging
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Agentic Endpoint Security - Kill Switch",
-    description="Emergency agent termination. Revokes, suspends, terminates.",
+    description="Emergency agent termination. REAL isolation and egress block.",
     version="0.1.0",
 )
 
@@ -41,6 +41,8 @@ REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://localhost:8081")
 IDENTITY_URL = os.environ.get("IDENTITY_URL", "http://localhost:8083")
 BROKER_URL = os.environ.get("BROKER_URL", "http://localhost:8080")
 TELEMETRY_URL = os.environ.get("TELEMETRY_URL", "http://localhost:8085")
+EDR_SENSOR_URL = os.environ.get("EDR_SENSOR_URL", "http://localhost:8088")
+EGRESS_PROXY_URL = os.environ.get("EGRESS_PROXY_URL", "http://localhost:8087")
 
 _kill_history: dict[str, KillStatus] = {}
 
@@ -112,26 +114,64 @@ async def _terminate_tasks(task_ids: list[str]) -> tuple[list[str], list[str]]:
     return terminated, errors
 
 
-async def _log_edr_isolate(agent_id: str, reason: str) -> bool:
+async def _edr_isolate(agent_id: str, reason: str) -> tuple[bool, dict[str, Any]]:
     """
-    Log EDR isolate hook.
-
-    In production, this would call the EDR API to isolate the endpoint.
-    Here we just log it as a simulated action.
+    REAL EDR isolation via EDR Sensor service.
+    
+    This actually pauses the container and disconnects it from networks.
     """
-    logger.warning(f"EDR ISOLATE HOOK: Agent {agent_id} - {reason}")
-    return True
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{EDR_SENSOR_URL}/v1/isolate",
+                params={
+                    "agent_id": agent_id,
+                    "reason": reason,
+                },
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                success = data.get("success", False)
+                logger.warning(f"EDR ISOLATE: {agent_id} - success={success}")
+                return success, data
+            else:
+                logger.error(f"EDR ISOLATE FAILED: {response.status_code}")
+                return False, {"error": f"EDR error: {response.status_code}"}
+
+    except httpx.RequestError as e:
+        logger.error(f"EDR ISOLATE UNREACHABLE: {e}")
+        return False, {"error": f"EDR unreachable: {e}"}
 
 
-async def _log_egress_deny(agent_id: str, reason: str) -> bool:
+async def _egress_block(agent_id: str, reason: str) -> tuple[bool, dict[str, Any]]:
     """
-    Log egress deny hook.
-
-    In production, this would update firewall rules to deny egress.
-    Here we just log it as a simulated action.
+    REAL egress block via Egress Proxy service.
+    
+    This actually blocks the agent from making any outbound requests.
     """
-    logger.warning(f"EGRESS DENY HOOK: Agent {agent_id} - {reason}")
-    return True
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                f"{EGRESS_PROXY_URL}/v1/block-agent",
+                params={
+                    "agent_id": agent_id,
+                    "reason": reason,
+                },
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                success = data.get("success", False)
+                logger.warning(f"EGRESS BLOCK: {agent_id} - success={success}")
+                return success, data
+            else:
+                logger.error(f"EGRESS BLOCK FAILED: {response.status_code}")
+                return False, {"error": f"Egress proxy error: {response.status_code}"}
+
+    except httpx.RequestError as e:
+        logger.error(f"EGRESS PROXY UNREACHABLE: {e}")
+        return False, {"error": f"Egress proxy unreachable: {e}"}
 
 
 async def _emit_kill_telemetry(kill_status: KillStatus) -> None:
@@ -149,8 +189,8 @@ async def _emit_kill_telemetry(kill_status: KillStatus) -> None:
             "registry_suspended": kill_status.registry_suspended,
             "tokens_revoked": kill_status.tokens_revoked,
             "tasks_terminated": kill_status.tasks_terminated,
-            "edr_isolate_logged": kill_status.edr_isolate_logged,
-            "egress_deny_logged": kill_status.egress_deny_logged,
+            "edr_isolated": kill_status.edr_isolate_logged,
+            "egress_blocked": kill_status.egress_deny_logged,
         },
     }
 
@@ -176,8 +216,8 @@ async def kill(request: KillRequest) -> KillStatus:
     1. Suspends the component in the registry
     2. Revokes all tokens for the agent
     3. Terminates active tasks
-    4. Logs EDR isolate hook
-    5. Logs egress deny hook
+    4. ACTUALLY isolates via EDR sensor (container pause + network disconnect)
+    5. ACTUALLY blocks egress via proxy
     """
     kill_id = f"kill-{uuid.uuid4().hex[:12]}"
     timestamp = datetime.utcnow()
@@ -203,8 +243,13 @@ async def kill(request: KillRequest) -> KillStatus:
     terminated_tasks, task_errors = await _terminate_tasks(request.task_ids)
     errors.extend(task_errors)
 
-    edr_logged = await _log_edr_isolate(request.agent_id, request.reason)
-    egress_logged = await _log_egress_deny(request.agent_id, request.reason)
+    edr_ok, edr_result = await _edr_isolate(request.agent_id, request.reason)
+    if not edr_ok:
+        errors.append(f"EDR: {edr_result.get('error', 'Unknown error')}")
+
+    egress_ok, egress_result = await _egress_block(request.agent_id, request.reason)
+    if not egress_ok:
+        errors.append(f"Egress: {egress_result.get('error', 'Unknown error')}")
 
     kill_status = KillStatus(
         kill_id=kill_id,
@@ -216,8 +261,8 @@ async def kill(request: KillRequest) -> KillStatus:
         registry_suspended=registry_ok,
         tokens_revoked=tokens_count,
         tasks_terminated=terminated_tasks,
-        edr_isolate_logged=edr_logged,
-        egress_deny_logged=egress_logged,
+        edr_isolate_logged=edr_ok,
+        egress_deny_logged=egress_ok,
         errors=errors,
     )
 
@@ -228,7 +273,8 @@ async def kill(request: KillRequest) -> KillStatus:
     logger.info(
         f"Kill switch {kill_id} completed: "
         f"suspended={registry_ok}, tokens_revoked={tokens_count}, "
-        f"tasks_terminated={len(terminated_tasks)}, errors={len(errors)}"
+        f"tasks_terminated={len(terminated_tasks)}, "
+        f"edr_isolated={edr_ok}, egress_blocked={egress_ok}, errors={len(errors)}"
     )
 
     return kill_status

@@ -4,7 +4,7 @@ Independent execution broker and control plane for AI agents on enterprise endpo
 
 ## The Problem
 
-AI agents on enterprise endpoints—coding agents, IDE extensions, browser extensions, local MCP servers, skills, and local models—act under the user's identity. They inherit the user's credentials, file access, and network permissions. When an agent is compromised, it's often not through a binary exploit but through a hijacked goal, a poisoned tool definition, or an over-delegated credential—often just a sentence in a prompt.
+AI agents on enterprise endpoints—coding agents, IDE extensions, browser extensions, local MCP servers, skills, and local models—act under the user's identity. They inherit the user's credentials, file access, and network permissions. When an agent is compromised, it's often not through a binary exploit but through a hijacked goal, a poisoned tool definition, or an inherited token—often just a sentence in a prompt.
 
 Traditional EDR still matters. But EDR cannot see:
 - **Which agent** performed an action
@@ -14,14 +14,14 @@ Traditional EDR still matters. But EDR cannot see:
 
 ## Architecture Thesis
 
-**The agent PROPOSES actions. An independent policy enforcement point OUTSIDE the agent process approves, constrains, or denies them.**
+**The agent PROPOSES actions. An independent policy enforcement point OUTSIDE the agent process approves, constrains, or denies them. The model classifier is an advisor, not a boundary.**
 
 The kill switch does not send a polite stop to the agent. It:
 1. Revokes tokens
 2. Suspends the component in the registry
 3. Terminates the task tree
-4. Hooks EDR isolate
-5. Hooks egress deny
+4. **ACTUALLY** isolates via EDR sensor (container pause + network disconnect)
+5. **ACTUALLY** blocks egress via proxy
 
 ### Nine Invariants
 
@@ -38,54 +38,68 @@ The kill switch does not send a polite stop to the agent. It:
 ## Architecture at a Glance
 
 ```
-┌─────────────┐     PROPOSE      ┌─────────────┐
-│   Agent     │ ───────────────► │   Broker    │ ◄─── Policy Enforcement Point
-│  (proposes) │                  │   :8080     │
-└─────────────┘                  └──────┬──────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    │                   │                   │
-                    ▼                   ▼                   ▼
-            ┌───────────┐       ┌───────────┐       ┌───────────┐
-            │  Registry │       │    PDP    │       │ Telemetry │
-            │   :8081   │       │   :8082   │       │   :8085   │
-            └───────────┘       └───────────┘       └───────────┘
-                                        │
-                                        ▼
-                                ┌───────────┐
-                                │ Approval  │ ◄─── Out-of-band human approval
-                                │   :8084   │
-                                └───────────┘
-
-            ┌───────────┐       ┌───────────┐
-            │ Identity  │       │Kill Switch│ ◄─── Emergency termination
-            │   :8083   │       │   :8086   │
-            └───────────┘       └───────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        AGENTIC-NET (Docker)                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                      │
+│  │  IdP    │    │ Redis   │    │ PDP x2  │◄─── Nginx LB (HA)    │
+│  │ (JWKS)  │    │(shared) │    │         │                      │
+│  └────┬────┘    └────┬────┘    └────┬────┘                      │
+│       │              │              │                            │
+│  ┌────┴──────────────┴──────────────┴────┐                      │
+│  │              BROKER (PEP)             │                      │
+│  │  - Typed adapters only                │                      │
+│  │  - Offline fail-closed (Class D)      │                      │
+│  │  - Policy cache for Class A           │                      │
+│  └───────────────────┬───────────────────┘                      │
+│                      │                                           │
+│  ┌───────────────────┼───────────────────┐                      │
+│  │                   │                   │                      │
+│  ▼                   ▼                   ▼                      │
+│  ┌─────────┐    ┌─────────┐    ┌─────────────┐                  │
+│  │ Egress  │    │  EDR    │    │  Isolated   │                  │
+│  │ Proxy   │    │ Sensor  │    │   Desktop   │                  │
+│  │ (deny)  │    │(Docker) │    │   (Xvfb)    │                  │
+│  └─────────┘    └─────────┘    └─────────────┘                  │
+│       ▲              ▲                                           │
+│       │              │                                           │
+│  ┌────┴──────────────┴────┐                                     │
+│  │      KILL SWITCH       │                                     │
+│  │  (real isolate + deny) │                                     │
+│  └────────────────────────┘                                     │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Repository Map
 
 ```
 ├── services/
-│   ├── registry/        # Component inventory (:8081)
-│   ├── pdp/             # Policy Decision Point (:8082)
-│   ├── identity/        # Agent token service (:8083)
-│   ├── broker/          # Policy Enforcement Point (:8080)
-│   ├── approval/        # Out-of-band approval (:8084)
-│   ├── telemetry/       # Audit events (:8085)
-│   ├── killswitch/      # Emergency termination (:8086)
-│   └── demo_agent/      # Demo cooperating agent (:8090)
+│   ├── registry/           # Component inventory (:8081)
+│   ├── pdp/                # Policy Decision Point (:8082, HA)
+│   ├── identity/           # Token management (:8083)
+│   ├── broker/             # Policy Enforcement Point (:8080)
+│   ├── approval/           # Out-of-band approval (:8084)
+│   ├── telemetry/          # Audit events (:8085)
+│   ├── killswitch/         # Emergency termination (:8086)
+│   ├── idp/                # Local IdP with JWKS (:8443) ← NEW
+│   ├── egress_proxy/       # Real egress deny (:8087) ← NEW
+│   ├── edr_sensor/         # Real container isolation (:8088) ← NEW
+│   ├── isolated_desktop/   # Xvfb sandbox (:8089) ← NEW
+│   └── demo_agent/         # Demo cooperating agent (:8090)
 ├── packages/
-│   └── common/          # Shared models, JWT utils, path safety
+│   └── common/             # Shared models, JWT utils, path safety, Redis state
 ├── policies/
-│   ├── default.yaml     # Policy configuration
-│   └── examples.rego    # OPA Rego examples (documentation)
-├── tests/               # Pytest test suite
-├── docs/                # Documentation
-├── presentation/        # Executive deck
-├── scripts/             # Demo and utility scripts
-├── docker-compose.yml   # Container orchestration
-└── Makefile             # Development commands
+│   ├── default.yaml        # Policy configuration
+│   └── examples.rego       # OPA Rego examples (documentation)
+├── certs/                  # TLS certificates (generated by make certs)
+├── tests/                  # Pytest test suite
+├── docs/                   # Documentation
+├── presentation/           # Executive deck
+├── scripts/                # Demo and utility scripts
+├── docker-compose.yml      # Container orchestration with HA
+├── nginx-pdp.conf          # Load balancer for PDP HA
+└── Makefile                # Development commands
 ```
 
 ## Quick Start
@@ -93,7 +107,8 @@ The kill switch does not send a polite stop to the agent. It:
 ### Prerequisites
 
 - Python 3.12+
-- Docker and Docker Compose (for containerized deployment)
+- Docker and Docker Compose
+- OpenSSL (for certificate generation)
 
 ### Run Tests
 
@@ -101,15 +116,21 @@ The kill switch does not send a polite stop to the agent. It:
 # Install dependencies
 make install
 
-# Run the test suite
+# Run the test suite (128 tests)
 make test
 ```
 
 ### Run with Docker Compose
 
 ```bash
-# Start all services
+# Generate TLS certificates
+make certs
+
+# Start all services (with TLS, HA, Redis)
 make up
+
+# Check service health
+make health
 
 # View logs
 make logs
@@ -117,19 +138,24 @@ make logs
 # Run demo scenarios
 make demo
 
+# Test kill switch (real isolation!)
+make kill
+
 # Stop services
 make down
 ```
 
 ### Run Demo Scenarios
 
-The demo agent demonstrates five key scenarios:
+The demo agent demonstrates five key scenarios plus real isolation:
 
 1. **Allowed Read** — Reading from an approved path succeeds
 2. **Denied Shell** — Shell execution is denied (agent has shell=false)
 3. **Denied Path Traversal** — Write with `..` is rejected
 4. **Approval Required** — Untrusted input + write requires human approval
 5. **Kill Switch** — After kill switch, subsequent actions are denied
+6. **Real Isolation** — Container is paused, network disconnected
+7. **Real Egress Block** — Agent cannot reach any destination
 
 ```bash
 ./scripts/demo.sh
@@ -144,40 +170,47 @@ The demo agent demonstrates five key scenarios:
 - [05 - Deployment](docs/05-deployment.md) — Local, staging, production
 - [06 - Operator Runbook](docs/06-operator-runbook.md) — Day-to-day operations
 
-## Status
+## Status: Deploy Honestly
 
-**Reference Implementation** — Compose is demo. Production is integration next to EDR/IdP/DLP, not a replacement.
-
-### What This Is
-
-- A working demonstration of the architecture thesis
-- A testbed for policy enforcement patterns
-- A starting point for production implementations
-- Documentation of security invariants
-
-### What This Is Not
-
-- A replacement for EDR (EDR stays mandatory)
-- A complete production system (missing HA, TLS, real IdP integration)
-- A vendor product (vendor-neutral reference implementation)
+This reference implementation now includes **real working integrations**, not just logged hooks.
 
 ### Demo vs. Production
 
-| Demo (This Repo) | Production |
-|-----------------|------------|
-| In-memory JWT | RFC 8693 token exchange with IdP |
-| Logged EDR hooks | Real EDR API integration |
-| Logged egress hooks | Real firewall rules |
-| No TLS | TLS everywhere |
-| Single instance | HA cluster |
+| Feature | This Repo | Production Swap-In |
+|---------|-----------|-------------------|
+| TLS | ✅ Dev CA + mTLS | Org CA |
+| IdP | ✅ Local IdP (RS256/JWKS) | Org IdP via RFC 8693 |
+| Token Revocation | ✅ Redis-backed | Same Redis or org IdP |
+| Egress Control | ✅ Real proxy with default-deny | Org firewall API |
+| EDR Isolation | ✅ Real container isolation (Docker) | Vendor EDR API |
+| HA | ✅ PDP replicas + Redis shared state | K8s/ECS + managed Redis |
+| Offline Mode | ✅ Class D fail-closed | Same |
+| Computer-Use | ✅ Isolated Xvfb sandbox | Same (never operator desktop) |
 
-### Out of Scope for MVP
+### What's Real Now
 
-- Computer-use / GUI automation on the user desktop
-- Real EDR integration (hooks are logged)
-- Production IdP integration
-- High availability / clustering
-- TLS termination
+- ✅ RS256-signed JWTs from local IdP with JWKS endpoint
+- ✅ Egress denied at proxy level (403, not just logged)
+- ✅ Container isolation via Docker API (pause + network disconnect)
+- ✅ Fail-closed when PDP unreachable (Class D)
+- ✅ Shared state via Redis (revocation, approval, kill)
+- ✅ PDP HA with nginx load balancer
+- ✅ Computer-use in isolated Xvfb sandbox (never operator desktop)
+
+### Still Simulated
+
+- File operations (no real file I/O)
+- Network egress forwarding (real deny, simulated forward)
+
+### Production Swap-In Points
+
+| This Repo | Production Replacement |
+|-----------|----------------------|
+| Local IdP | Okta/Azure AD/Google via RFC 8693 |
+| Redis | AWS ElastiCache / Azure Cache |
+| Egress Proxy | Palo Alto / Zscaler API |
+| EDR Sensor | CrowdStrike / Defender API |
+| Docker Compose | Kubernetes / ECS |
 
 ## 90-Day Ask
 
@@ -188,7 +221,7 @@ The demo agent demonstrates five key scenarios:
 
 **Days 31-60: Integrate**
 - Connect to IdP (RFC 8693)
-- Wire EDR isolate hooks
+- Wire EDR API (replace Docker sensor)
 - Build approval workflows
 
 **Days 61-90: One Coding Agent**
@@ -222,7 +255,7 @@ The demo agent demonstrates five key scenarios:
 
 ### Known Vulnerabilities
 
-- CVE-2025-32711 (EchoLeak) — Patched zero-click indirect prompt-injection information-disclosure vulnerability in Microsoft 365 Copilot
+- CVE-2025-32711 (EchoLeak) — Patched zero-click indirect prompt-injection information-disclosure vulnerability in Microsoft 365 Copilot (NOT a confirmed in-the-wild breach)
 
 ## License
 
