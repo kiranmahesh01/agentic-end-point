@@ -1,0 +1,408 @@
+version: '3.8'
+
+# Agentic Endpoint Security - Full Stack with Real Integrations
+#
+# This compose file includes:
+# - TLS/mTLS between all services (internal)
+# - Local IdP with RS256 and JWKS
+# - Real egress proxy with default-deny
+# - Real EDR sensor with container isolation
+# - Redis for HA shared state
+# - PDP with HA (2 replicas behind load balancer)
+# - Isolated desktop sandbox for computer-use
+#
+# Quick start:
+#   make certs   # Generate TLS certificates
+#   make up      # Start the stack
+#   make demo    # Run demo scenarios
+#   make kill    # Test kill switch
+
+services:
+  # --- Infrastructure ---
+  
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - agentic-net
+
+  # --- Core Services ---
+  
+  registry:
+    build:
+      context: .
+      dockerfile: services/registry/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  idp:
+    build:
+      context: .
+      dockerfile: services/idp/Dockerfile
+    ports:
+      - "8443:8443"
+    environment:
+      - TOKEN_EXPIRY_SECONDS=300
+      - IDP_ISSUER=https://idp.agentic-security.local
+      - REDIS_URL=redis://redis:6379
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  identity:
+    build:
+      context: .
+      dockerfile: services/identity/Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - JWT_SECRET=dev-secret-change-in-production
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRY_SECONDS=300
+      - REDIS_URL=redis://redis:6379
+      - IDP_URL=http://idp:8443
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+      idp:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  pdp:
+    build:
+      context: .
+      dockerfile: services/pdp/Dockerfile
+    environment:
+      - REGISTRY_URL=http://registry:8081
+      - TELEMETRY_URL=http://telemetry:8085
+      - APPROVED_READ_ROOTS=/approved/workspace,/tmp/approved
+      - APPROVED_WRITE_ROOTS=/approved/output
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      registry:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+    deploy:
+      replicas: 2
+
+  # Load balancer for PDP HA
+  pdp-lb:
+    image: nginx:alpine
+    ports:
+      - "8082:80"
+    volumes:
+      - ./nginx-pdp.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - pdp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  egress-proxy:
+    build:
+      context: .
+      dockerfile: services/egress_proxy/Dockerfile
+    ports:
+      - "8087:8087"
+    environment:
+      - EGRESS_ALLOWLIST=reports.internal.example
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  edr-sensor:
+    build:
+      context: .
+      dockerfile: services/edr_sensor/Dockerfile
+    ports:
+      - "8088:8088"
+    environment:
+      - DOCKER_SOCKET=/var/run/docker.sock
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./certs:/app/certs:ro
+    privileged: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  isolated-desktop:
+    build:
+      context: .
+      dockerfile: services/isolated_desktop/Dockerfile
+    ports:
+      - "8089:8089"
+    environment:
+      - SANDBOX_DISPLAY=:99
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      # SAFETY: No access to host display
+      - HOST_DISPLAY=
+      - DISPLAY=:99
+    # SAFETY: No bind-mount of host desktop, no /dev/input
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  broker:
+    build:
+      context: .
+      dockerfile: services/broker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PDP_URL=http://pdp-lb:80
+      - PDP_BACKUP_URL=
+      - TELEMETRY_URL=http://telemetry:8085
+      - ISOLATED_DESKTOP_URL=http://isolated-desktop:8089
+      - EGRESS_PROXY_URL=http://egress-proxy:8087
+      - APPROVED_READ_ROOTS=/approved/workspace,/tmp/approved
+      - APPROVED_WRITE_ROOTS=/approved/output
+      - PDP_TIMEOUT_SECONDS=5
+      - LOCAL_CACHE_TTL_SECONDS=5
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      pdp-lb:
+        condition: service_healthy
+      telemetry:
+        condition: service_healthy
+      egress-proxy:
+        condition: service_healthy
+      isolated-desktop:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  approval:
+    build:
+      context: .
+      dockerfile: services/approval/Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - APPROVAL_HMAC_SECRET=dev-hmac-secret-change-in-production
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  telemetry:
+    build:
+      context: .
+      dockerfile: services/telemetry/Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agentic-net
+
+  killswitch:
+    build:
+      context: .
+      dockerfile: services/killswitch/Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      - REGISTRY_URL=http://registry:8081
+      - IDENTITY_URL=http://identity:8083
+      - BROKER_URL=http://broker:8080
+      - TELEMETRY_URL=http://telemetry:8085
+      - EDR_SENSOR_URL=http://edr-sensor:8088
+      - EGRESS_PROXY_URL=http://egress-proxy:8087
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      registry:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+      telemetry:
+        condition: service_healthy
+      edr-sensor:
+        condition: service_healthy
+      egress-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+  demo-agent:
+    build:
+      context: .
+      dockerfile: services/demo_agent/Dockerfile
+    container_name: demo-agent
+    ports:
+      - "8090:8090"
+    environment:
+      - BROKER_URL=http://broker:8080
+      - IDENTITY_URL=http://identity:8083
+      - KILLSWITCH_URL=http://killswitch:8086
+      - LOG_LEVEL=INFO
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - CERTS_DIR=/app/certs
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      broker:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      killswitch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agentic-net
+
+networks:
+  agentic-net:
+    driver: bridge
+
+volumes:
+  redis-data:

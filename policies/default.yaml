@@ -1,0 +1,187 @@
+# Agentic Endpoint Security - Default Policy Configuration
+#
+# This file defines the default policy rules enforced by the PDP.
+# The Python PDP loads and enforces these rules directly.
+# See policies/examples.rego for equivalent OPA Rego documentation.
+
+version: "1.0"
+description: "Default deny policy for agentic endpoint security"
+
+# Core principle: Default DENY. Only explicitly allowed actions proceed.
+default_decision: DENY
+
+# Required fields - missing any of these results in immediate DENY
+required_fields:
+  - user
+  - agent_identity
+  - agent_instance
+  - agent_version
+  - endpoint_id
+  - task_id
+  - tool_id
+  - tool_version
+  - tool_definition_hash
+  - requested_operation
+  - target_resource
+
+# Operations that require registry lookup
+registry_required_operations:
+  - read_file
+  - write_file
+  - run_command
+  - http_request
+  - load_model
+
+# Class A operations (can use local cache for approved roots)
+class_a_operations:
+  - read_file
+
+# Class B operations (always remote PDP, fail closed)
+class_b_operations:
+  - write_file
+  - http_request
+  - run_command
+  - load_model
+  - access_secret
+  - automate_ui  # Computer-use in isolated sandbox
+
+# Class C operations (require human approval)
+class_c_operations:
+  - delete_file
+  - execute_privileged
+  - modify_system
+
+# Class D operations (offline mode - only Class A from cache allowed)
+class_d_notes: |
+  When PDP/identity is unreachable:
+  - Class A reads from approved roots: MAY proceed from cache
+  - All Class B/C operations: FAIL CLOSED (no writes, no egress, no commands, no model load, no computer-use)
+
+# Input trust rules
+input_trust_rules:
+  untrusted:
+    # Untrusted input + execution = always DENY
+    deny_operations:
+      - run_command
+      - execute_privileged
+      - load_model
+    # Untrusted input + write/egress = REQUIRE_APPROVAL
+    require_approval_operations:
+      - write_file
+      - http_request
+  internal:
+    # Internal input may proceed with standard checks
+    allow_with_checks: true
+  trusted:
+    # Trusted input may proceed with standard checks
+    allow_with_checks: true
+
+# Risk tier rules
+risk_tier_rules:
+  # Tier 0: Minimal risk, pre-approved for basic operations
+  tier_0:
+    max_autonomy: high
+    auto_approve_reads: true
+  # Tier 1: Low risk, standard operations
+  tier_1:
+    max_autonomy: medium
+    auto_approve_reads: true
+  # Tier 2: Medium risk, requires monitoring
+  tier_2:
+    max_autonomy: low
+    auto_approve_reads: true
+    require_logging: true
+  # Tier 3: High risk, requires approval for most operations
+  tier_3:
+    max_autonomy: none
+    require_approval_for_writes: true
+    require_logging: true
+  # Tier 4: Critical risk, restricted operations only
+  tier_4:
+    max_autonomy: none
+    require_approval_for_all: true
+    require_logging: true
+
+# Lifecycle rules
+lifecycle_rules:
+  # Only active components can be used
+  allowed_lifecycles:
+    - active
+  # Suspended components are always denied
+  denied_lifecycles:
+    - suspended
+    - retired
+  # Proposed components cannot be used
+  pending_lifecycles:
+    - proposed
+    - approved  # Approved but not yet activated
+
+# Path safety rules
+path_safety:
+  # Paths that are always denied
+  denied_patterns:
+    - ".."
+    - "/etc/"
+    - "/proc/"
+    - "/sys/"
+    - "/dev/"
+    - "/boot/"
+    - "/root/"
+  # Symlink escape detection is mandatory
+  check_symlinks: true
+
+# Network egress rules
+egress_rules:
+  # Default deny all egress
+  default: deny
+  # Only allow egress to permitted destinations
+  require_allowlist: true
+
+# Shell execution rules
+shell_rules:
+  # Never allow raw shell strings
+  allow_raw_shell: false
+  # Only typed commands with command_id + typed args
+  require_typed_commands: true
+  # Shell disabled by default for all components
+  default_shell_permission: false
+
+# Computer-use rules (automate_ui)
+# SAFETY: Computer-use NEVER drives the operator's real desktop.
+# All actions execute in an isolated Xvfb sandbox container.
+computer_use_rules:
+  # Default deny - component must have explicit computer_use permission
+  default: deny
+  # Only templated RPA actions - no raw click/keystream API
+  allow_raw_clicks: false
+  allow_raw_keystream: false
+  require_templates: true
+  # High-impact templates require OOB approval
+  high_impact_templates:
+    - submit_form
+    - close_window
+    - download_file
+    - execute_script
+  # Sandbox requirements
+  sandbox:
+    require_xvfb: true
+    no_host_display: true
+    no_dev_input: true
+    isolated_container: true
+
+# Approval requirements
+approval_rules:
+  # Never auto-approve in degraded mode
+  degraded_auto_approve: false
+  # Queue requests when approval service is down
+  degraded_queue: true
+  # In-agent UI prompts do not count as approval
+  in_agent_ui_counts: false
+
+# Telemetry requirements
+telemetry_rules:
+  # Always emit telemetry on decisions
+  emit_on_decision: true
+  # Never log secrets or model chain-of-thought
+  redact_secrets: true
+  redact_chain_of_thought: true
